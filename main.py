@@ -1,8 +1,22 @@
+import random
 from pyboy import PyBoy
 from pyboy.utils import WindowEvent
 
 
+def printBoard(game_map):
+    for row in game_map:
+        rowStr = ""
+        for tile in row:
+            if (tile is True):
+                rowStr += "#"
+            else:
+                rowStr += "."
+        print(rowStr)
+    print("")
+
+
 def readPieces(pyboy):
+    # next_piece, current_piece
     return pyboy.memory[0xC213], pyboy.memory[0xC203]
 
 
@@ -28,18 +42,6 @@ def readBoard(pyboy):
             else:
                 game_row.append(False)
         game_map.append(game_row)
-
-    # del game_map[len(game_map) - 2:]
-
-    for row in game_map:
-        rowStr = ""
-        for tile in row:
-            if (tile is True):
-                rowStr += "#"
-            else:
-                rowStr += "."
-        print(rowStr)
-
 
     return game_map
 
@@ -73,7 +75,7 @@ def count_holes(game_map, column_heights):
 def genPieceVector(pieceValue):
     total_pieces = 7
     piece_vector = [0] * total_pieces
-    if(pieceValue <= 24):
+    if (pieceValue <= 24):
         piece_vector[pieceValue // 4] = 1
     return piece_vector
 
@@ -136,28 +138,117 @@ def actOnInstruction(pyboy: PyBoy, move_dict: dict):
             pyboy.tick(1)
 
 
+def isCollided(game_map, piece_offsets, x_pos, y_pos):
+    for offset in piece_offsets:
+        if (offset[1] + y_pos > 15 or offset[0] + x_pos > 9):
+            continue
+        if (game_map[offset[1] + y_pos][offset[0] + x_pos] is True):
+            # right now it is just assuming the lowest Y It needs change the y based on which block collided
+            return True
+
+    return False
+
+
+def simulateMove(game_map, piece, rotations, x_pos):
+    if (piece > 6):
+        print("Not a valid piece passed to simulateMove")
+        return None
+
+    # boards was upside down
+    game_map.reverse()
+
+    PIECES = [
+        # L block 0x0 (0)
+        [
+            [(0, 0), (0, 1), (1, 1), (2, 1)],
+            [(0, 0), (1, 0), (1, 1), (1, 2)],
+            [(0, 0), (1, 0), (2, 0), (2, 1)],
+            [(0, 0), (0, 1), (0, 2), (1, 0)]
+        ],
+        # J blcok 0x4 (4)
+        [
+            [(0, 1), (1, 1), (2, 1), (2, 0)],
+            [(0, 0), (1, 0), (1, 1), (1, 2)],
+            [(0, 0), (0, 1), (1, 0), (2, 0)],
+            [(0, 0), (0, 1), (0, 2), (1, 2)]
+        ],
+        # I block 0x8 (8)
+        [
+            [(0, 0), (1, 0), (2, 0), (3, 0)],
+            [(1, 0), (1, 1), (1, 2), (1, 3)]
+        ],
+        # O block 0xc (12)
+        [
+            [(0, 0), (1, 0), (0, 1), (1, 1)]
+        ],
+        # Z block 0x10 (16)
+        [
+            [(0, 1), (1, 1), (1, 0), (2, 0)],
+            [(0, 0), (0, 1), (1, 1), (1, 2)]
+        ],
+        # S blcok 0x14 (20)
+        [
+            [(0, 0), (1, 0), (1, 1), (2, 1)],
+            [(0, 2), (0, 1), (1, 1), (1, 0)]
+        ],
+        # T block 0x18 (24)
+        [
+            [(0, 1), (1, 1), (1, 0), (2, 1)],
+            [(1, 0), (1, 1), (0, 1), (1, 2)],
+            [(0, 0), (1, 0), (2, 0), (1, 1)],
+            [(0, 0), (0, 1), (0, 2), (1, 1)]
+        ]
+    ]
+    # printBoard(game_map)
+    # this assumes that the pieces memory has already been divided by 4
+    # mods is to prevent out of bounds read if to many rotations were given
+    piece_offsets = PIECES[piece][rotations % len(PIECES[piece])]
+    max_height = 16
+    # +4 for the upwards I block
+    y = max_height + 4
+    while (isCollided(game_map, piece_offsets, x_pos, y) is False):
+        y -= 1
+
+    for offset in piece_offsets:
+        print(y + 1 + offset[1])
+        # this means your moves loses the game
+        if (y + 1 + offset[1] > 15):
+            break
+        game_map[y + 1 + offset[1]][x_pos - 1 + offset[0]] = True
+
+    game_map.reverse()
+    printBoard(game_map)
+
+    return game_map
+
+
 if __name__ == "__main__":
     pyboy = PyBoy('Tetris.gb', scale=4)
-    tickCount = 0
-    move_dict = {
-        "rotation" : 3,
-        "x_pos": 7
-    }
+    with open("ingame.state", "rb") as f:
+        pyboy.load_state(f)
+
+    tickCount = 1
     while (True):
-        # if ((tickCount % 360) == 0):
-            # actOnInstruction(pyboy, move_dict)
-        # pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-        # pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-        pyboy.button_press('a')
-        pyboy.tick(2)
-        pyboy.button_release('a')
+        # pyboy.button_press('a')
+        # pyboy.tick(2)
+        # pyboy.button_release('a')
+        prev_pieces = readPieces(pyboy)
         pyboy.tick(1)
         game_map = readBoard(pyboy)
         pieces = readPieces(pyboy)
         features = createFeatures(game_map, pieces)
-        print(features)
+        # print(features)
+        # printBoard(game_map)
+        if (pieces != prev_pieces):
+            '''move_dict = {
+                "rotation": random.randint(0, 3),
+                "x_pos": random.randint(0, 9)
+            }'''
+            move_dict = {
+                "rotation": 1,
+                "x_pos": 4
+            }
+            actOnInstruction(pyboy, move_dict)
+            simulateMove(game_map, pieces[1] // 4, 1, 4)
         tickCount += 1
-        # print(game_map)
-        # pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-        # pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
     pyboy.stop()
